@@ -1,66 +1,48 @@
-version: 2.1
-
-executors:
-  go-executor:
-    docker:
-      - image: cimg/go:1.21  # Use a more recent Go version
-    working_directory: /go/src/github.com/Silmi3607/invoicer-chapter2
-
+version: 2
 jobs:
-  build:
-    executor: go-executor
-    steps:
-      - checkout
-      - setup_remote_docker
+ build:
+  # Variable expansion in working_directory not supported at this time
+  # You will need to modify the code below to reflect your github account/repo setup
+  working_directory: /go/src/github.com/Silmi3607/invoicer-chapter2
+  docker:
+   - image: circleci/golang:1.10
+  steps:
+   - checkout
+   - setup_remote_docker
 
-      - run:
-          name: Set up Go Modules
-          command: |
-            git config --global url."https://$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@github.com/".insteadOf "https://github.com/"
-            go mod tidy
-            go mod vendor
+   - run: 
+      name: Setup environment
+      command: |
+       gb="/src/github.com/${CIRCLE_PROJECT_USERNAME}";
+       if [ ${CIRCLE_PROJECT_USERNAME} == 'Securing-DevOps' ]; then
+         dr="securingdevops"
+       else
+         dr=$DOCKER_USER
+       fi
+       cat >> $BASH_ENV << EOF
+       export GOPATH_HEAD="$(echo ${GOPATH}|cut -d ':' -f 1)"
+       export GOPATH_BASE="$(echo ${GOPATH}|cut -d ':' -f 1)${gb}"
+       export DOCKER_REPO="$dr"
+       EOF
+   - run: mkdir -p "${GOPATH_BASE}"
+   - run: mkdir -p "${GOPATH_HEAD}/bin"
+       
+   - run:
+      name: Testing application
+      command: |
+          go test \
+          github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
 
-      - run:
-          name: Run Tests
-          command: |
-            go test -v ./...
-
-  deploy:
-    executor: go-executor
-    steps:
-      - checkout
-      - setup_remote_docker
-
-      - run:
-          name: Build Binary
-          command: |
-            go build -o bin/invoicer ./...
-
-      - run:
-          name: Authenticate Docker
-          command: |
-            echo "${DOCKER_PASS}" | docker login -u "${DOCKER_USER}" --password-stdin
-
-      - run:
-          name: Build Docker Image
-          command: |
-            docker build -t ${DOCKER_USER}/invoicer:${CIRCLE_SHA1} .
-            docker tag ${DOCKER_USER}/invoicer:${CIRCLE_SHA1} ${DOCKER_USER}/invoicer:latest
-
-      - run:
-          name: Push Docker Image
-          command: |
-            docker push ${DOCKER_USER}/invoicer:${CIRCLE_SHA1}
-            docker push ${DOCKER_USER}/invoicer:latest
-
-workflows:
-  version: 2
-  build-and-deploy:
-    jobs:
-      - build
-      - deploy:
-          requires:
-            - build
-          filters:
-            branches:
-              only: master
+   - deploy:
+       command: |
+         if [ "${CIRCLE_BRANCH}" == "master" ]; then
+           docker login -u ${DOCKER_USER} -p ${DOCKER_PASS};
+           go install --ldflags '-extldflags "-static"' \
+           github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME};
+           mkdir bin;
+           cp "$GOPATH_HEAD/bin/${CIRCLE_PROJECT_REPONAME}" bin/invoicer;
+           docker build -t ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME} .;
+           docker images --no-trunc | awk '/^app/ {print $3}' | \
+             sudo tee $CIRCLE_ARTIFACTS/docker-image-shasum256.txt;
+           docker push ${DOCKER_REPO}/${CIRCLE_PROJECT_REPONAME};
+         fi
