@@ -2,6 +2,7 @@ version: 2
 jobs:
   build:
     # Variable expansion in working_directory not supported at this time
+    # You will need to modify the code below to reflect your GitHub account/repo setup
     working_directory: /go/src/github.com/Silmi3607/invoicer-chapter2
     docker:
       - image: circleci/golang:1.10
@@ -9,7 +10,7 @@ jobs:
       - checkout
       - setup_remote_docker
 
-      - run: 
+      - run:
           name: Setup environment
           command: |
             gb="/src/github.com/${CIRCLE_PROJECT_USERNAME}";
@@ -23,41 +24,26 @@ jobs:
             export GOPATH_BASE="$(echo ${GOPATH}|cut -d ':' -f 1)${gb}"
             export DOCKER_REPO="$dr"
             EOF
+
       - run: mkdir -p "${GOPATH_BASE}"
       - run: mkdir -p "${GOPATH_HEAD}/bin"
-      
+
       - run:
           name: Testing application
           command: |
             go test \
-            github.com/Silmi3607/invoicer-chapter2
+            github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
 
-  deploy:
-    docker:
-      - image: circleci/golang:1.10
-    steps:
-      - checkout
-      - setup_remote_docker
-
-      - run:
-          name: Login to Docker Hub
-          command: |
-            docker login -u ${DOCKER_USER} -p ${DOCKER_PASS}
-      
-      - run:
-          name: Build Docker image
-          command: |
-            go install --ldflags '-extldflags "-static"' \
-            github.com/Silmi3607/invoicer-chapter2;
-            mkdir bin;
-            cp "$GOPATH_HEAD/bin/invoicer-chapter2" bin/invoicer;
-            docker build -t smak18/devsecops/invoicer-chapter2:${CIRCLE_SHA1} .
-            docker images --no-trunc | awk '/^app/ {print $3}' | \
-              sudo tee $CIRCLE_ARTIFACTS/docker-image-shasum256.txt;
-
-      - run:
-          name: Push Docker image to Docker Hub
+      - deploy:
           command: |
             if [ "${CIRCLE_BRANCH}" == "master" ]; then
-              docker push smak18/devsecops/invoicer-chapter2:${CIRCLE_SHA1};
+              docker login -u ${DOCKER_USER} -p ${DOCKER_PASS};
+              go install --ldflags '-extldflags "-static"' \
+              github.com/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME};
+              mkdir bin;
+              cp "$GOPATH_HEAD/bin/${CIRCLE_PROJECT_REPONAME}" bin/invoicer;
+              docker build -t smak18/devsecops/${CIRCLE_PROJECT_REPONAME} .;
+              docker images --no-trunc | awk '/^app/ {print $3}' | \
+                sudo tee $CIRCLE_ARTIFACTS/docker-image-shasum256.txt;
+              docker push smak18/devsecops/${CIRCLE_PROJECT_REPONAME};
             fi
